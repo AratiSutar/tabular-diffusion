@@ -12,6 +12,9 @@ dependencies = [
     "numpy",
     "pandas",
     "scikit-learn",
+    # CPU only. Install with:
+    # pip install torch --index-url https://download.pytorch.org/whl/cpu
+    "torch",
 ]
 
 [project.optional-dependencies]
