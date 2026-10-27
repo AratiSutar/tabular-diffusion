@@ -9,9 +9,11 @@ description = ""
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "joblib",
     "numpy",
     "pandas",
     "scikit-learn",
+    "scipy",
     # CPU only. Install with:
     # pip install torch --index-url https://download.pytorch.org/whl/cpu
     "torch",
