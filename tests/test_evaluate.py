@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tabdiff.evaluate import EDUCATION_NUM, compare, education_consistency
+from tabdiff.evaluate import EDUCATION_NUM, compare, education_consistency, utility
 
 NUMERIC = ["age"]
 CATEGORICAL = ["sex"]
@@ -61,3 +61,39 @@ def test_consistency_counts_mismatches():
         }
     )
     assert education_consistency(df) == 0.5
+
+
+def make_labelled(n, seed):
+    """Small Adult-like rows where the label depends on age and sex."""
+    rng = np.random.default_rng(seed)
+    age = rng.integers(18, 70, size=n)
+    sex = rng.choice(["Male", "Female"], size=n)
+    score = (age - 40) / 10 + (sex == "Male") + rng.normal(size=n)
+    label = np.where(score > 0.5, ">50K", "<=50K")
+    return pd.DataFrame({"age": age, "sex": sex, "class": label})
+
+
+def test_utility_gap_is_zero_when_fake_equals_real():
+    train, test = make_labelled(300, seed=0), make_labelled(200, seed=1)
+    result = utility(train, test, train.copy())
+    assert result["message"] is None
+    assert result["gap"] == pytest.approx(0.0, abs=1e-9)
+    assert result["real_accuracy"] == pytest.approx(result["fake_accuracy"])
+
+
+def test_utility_scores_are_in_range():
+    train, test = make_labelled(300, seed=0), make_labelled(200, seed=1)
+    fake = make_labelled(300, seed=2)
+    result = utility(train, test, fake)
+    for key in ["real_auc", "fake_auc", "real_accuracy", "fake_accuracy"]:
+        assert 0 <= result[key] <= 1
+
+
+def test_utility_one_class_fake_data_gives_message():
+    train, test = make_labelled(300, seed=0), make_labelled(200, seed=1)
+    fake = train.assign(**{"class": "<=50K"})
+    result = utility(train, test, fake)
+    assert "only one value" in result["message"]
+    assert np.isnan(result["fake_auc"])
+    assert np.isnan(result["gap"])
+    assert 0 <= result["real_auc"] <= 1
