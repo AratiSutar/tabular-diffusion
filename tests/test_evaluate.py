@@ -2,7 +2,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tabdiff.evaluate import EDUCATION_NUM, compare, education_consistency, utility
+from tabdiff.evaluate import (
+    EDUCATION_NUM,
+    compare,
+    education_consistency,
+    privacy,
+    utility,
+)
+from tabdiff.preprocess import TabularEncoder
 
 NUMERIC = ["age"]
 CATEGORICAL = ["sex"]
@@ -97,3 +104,40 @@ def test_utility_one_class_fake_data_gives_message():
     assert np.isnan(result["fake_auc"])
     assert np.isnan(result["gap"])
     assert 0 <= result["real_auc"] <= 1
+
+
+def make_rows(n, seed):
+    """Small rows with a float column, so new rows never match old ones."""
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame(
+        {
+            "age": rng.integers(18, 70, size=n),
+            "score": rng.normal(50.0, 10.0, size=n),
+            "sex": rng.choice(["Male", "Female"], size=n),
+        }
+    )
+
+
+@pytest.fixture
+def privacy_data():
+    train, test = make_rows(200, seed=0), make_rows(50, seed=1)
+    encoder = TabularEncoder(["age", "score"], ["sex"]).fit(train)
+    return train, test, encoder
+
+
+def test_privacy_copied_rows_are_exact_copies(privacy_data):
+    train, test, encoder = privacy_data
+    fake = train.sample(50, random_state=0)
+    table = privacy(train, test, fake, encoder)
+    assert list(table.index) == ["test", "fake"]
+    assert table.loc["fake", "exact_copy_share"] == 1.0
+    assert table.loc["fake", "median_distance"] == 0.0
+
+
+def test_privacy_new_rows_are_not_copies(privacy_data):
+    train, test, encoder = privacy_data
+    fake = make_rows(50, seed=2)
+    table = privacy(train, test, fake, encoder)
+    assert table.loc["fake", "exact_copy_share"] == 0.0
+    assert table.loc["test", "exact_copy_share"] == 0.0
+    assert table.loc["fake", "p5_distance"] > 0

@@ -6,6 +6,7 @@ from scipy.stats import ks_2samp
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.neighbors import NearestNeighbors
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
@@ -181,3 +182,45 @@ def utility(
     result["fake_accuracy"] = fake_accuracy
     result["gap"] = real_auc - fake_auc
     return result
+
+
+def _closest_distances(
+    neighbors: NearestNeighbors, train: np.ndarray, rows: np.ndarray
+) -> np.ndarray:
+    """Return the distance from each of ``rows`` to its closest ``train`` row."""
+    index = neighbors.kneighbors(rows, n_neighbors=1, return_distance=False)[:, 0]
+    # Measure again directly: the fast search can return a tiny non-zero
+    # distance for an exact copy because of rounding.
+    return np.linalg.norm(rows - train[index], axis=1)
+
+
+def privacy(
+    real_train: pd.DataFrame,
+    real_test: pd.DataFrame,
+    fake: pd.DataFrame,
+    encoder,
+) -> pd.DataFrame:
+    """Say how close fake rows are to the training rows, next to how close
+    unseen real rows (``real_test``) are.
+
+    All three DataFrames are turned into arrays with ``encoder`` (a
+    ``TabularEncoder`` fitted on ``real_train``). For every ``real_test``
+    row and every ``fake`` row it finds the distance to the closest
+    ``real_train`` row.
+
+    Returns one row each for ``test`` and ``fake`` with the share of exact
+    copies (distance 0), the 5th percentile distance and the median
+    distance. Fake rows much closer than test rows hint that the model
+    memorised training rows.
+    """
+    train = encoder.transform(real_train)
+    neighbors = NearestNeighbors(n_neighbors=1).fit(train)
+    rows = {}
+    for name, df in [("test", real_test), ("fake", fake)]:
+        distances = _closest_distances(neighbors, train, encoder.transform(df))
+        rows[name] = {
+            "exact_copy_share": float((distances == 0).mean()),
+            "p5_distance": float(np.percentile(distances, 5)),
+            "median_distance": float(np.median(distances)),
+        }
+    return pd.DataFrame(rows).T
